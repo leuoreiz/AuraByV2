@@ -20,7 +20,8 @@ import kotlin.math.abs
 
 /**
  * Tela de Receitas (Valor que entra na conta).
- * Suporta navegação arrastando para o lado (ViewPager) e barra inferior fixa (Despesas / Receitas).
+ * Suporta navegação arrastando para o lado (ViewPager), barra inferior fixa (Despesas / Receitas)
+ * e escolha de qualquer um dos 12 meses do ano.
  */
 class RevenuesActivity : AppCompatActivity() {
 
@@ -28,7 +29,7 @@ class RevenuesActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         val initialMonth = savedInstanceState?.getString("month")
             ?: intent.getStringExtra("month")
-            ?: "Abril"
+            ?: ExpensesActivity.getCurrentCalendarMonth()
         window.statusBarColor = Color.rgb(13, 17, 16)
         window.navigationBarColor = Color.rgb(13, 17, 16)
 
@@ -71,9 +72,10 @@ class RevenuesActivity : AppCompatActivity() {
 
         private fun Context.dp(n: Int) = (n * resources.displayMetrics.density + .5f).toInt()
 
-        private fun Context.bg(color: Int, radius: Int = 16) = GradientDrawable().apply {
+        private fun Context.bg(color: Int, radius: Int = 16, strokeColor: Int? = null) = GradientDrawable().apply {
             setColor(color)
             cornerRadius = dp(radius).toFloat()
+            strokeColor?.let { setStroke(dp(1), it) }
         }
 
         private fun Context.label(s: String, size: Float = 13f, color: Int = Color.WHITE, bold: Boolean = false) = TextView(this).apply {
@@ -101,9 +103,14 @@ class RevenuesActivity : AppCompatActivity() {
             background = bg(Color.rgb(29, 33, 29))
         }
 
+        private fun revenuesPrefKey(context: Context, targetMonth: String): String {
+            val userEmail = ExpensesActivity.getCurrentUserEmail(context)
+            return if (userEmail == "teste@aura.com") "revenues_$targetMonth" else "revenues_${userEmail}_$targetMonth"
+        }
+
         fun getCustomRevenues(context: Context, targetMonth: String): MutableList<CustomEntry> {
             val prefs = context.getSharedPreferences("aura_finance_prefs", Context.MODE_PRIVATE)
-            val raw = prefs.getString("revenues_$targetMonth", "[]") ?: "[]"
+            val raw = prefs.getString(revenuesPrefKey(context, targetMonth), "[]") ?: "[]"
             val list = mutableListOf<CustomEntry>()
             try {
                 val arr = JSONArray(raw)
@@ -134,7 +141,7 @@ class RevenuesActivity : AppCompatActivity() {
             }
             context.getSharedPreferences("aura_finance_prefs", Context.MODE_PRIVATE)
                 .edit()
-                .putString("revenues_$targetMonth", arr.toString())
+                .putString(revenuesPrefKey(context, targetMonth), arr.toString())
                 .apply()
         }
 
@@ -233,7 +240,7 @@ class RevenuesActivity : AppCompatActivity() {
                     saveCustomRevenues(context, month, entries)
                     dialog.dismiss()
                     onAdded()
-                    Toast.makeText(context, "Receita de ${money.format(value)} adicionada!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Receita de ${money.format(value)} adicionada em $month!", Toast.LENGTH_SHORT).show()
                 }
             }
             actions.addView(cancelBtn)
@@ -262,36 +269,49 @@ class RevenuesActivity : AppCompatActivity() {
 
             val title = context.row()
             title.addView(context.label("Receitas", 24f, Color.WHITE, true), LinearLayout.LayoutParams(0, -2, 1f))
-            title.addView(
-                context.label(month, 12f, gold).apply {
-                    setPadding(context.dp(10), context.dp(7), context.dp(10), context.dp(7))
-                    background = context.bg(Color.rgb(37, 41, 35), 10)
-                }
-            )
             body.put(context, title, 4)
 
-            val months = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-            listOf("Abril", "Março", "Fevereiro").forEach { name ->
+            val allMonths = ExpensesActivity.allMonths
+            val currentIdx = allMonths.indexOf(month).coerceAtLeast(0)
+            val prevIdx = if (currentIdx > 0) currentIdx - 1 else allMonths.lastIndex
+            val quickMonths = listOf(month, allMonths[prevIdx])
+
+            val monthsBar = context.row()
+            quickMonths.forEach { name ->
                 val active = name == month
-                months.addView(
+                monthsBar.addView(
                     context.label(
-                        if (name == "Abril") "✓ Este mês (Abril)" else name,
+                        if (active) "✓ $name" else name,
                         11f,
                         if (active) ink else Color.WHITE,
                         active
                     ).apply {
                         gravity = Gravity.CENTER
                         background = context.bg(if (active) gold else Color.rgb(35, 39, 35), 24)
-                        minHeight = context.dp(44)
+                        minHeight = context.dp(42)
                         setPadding(context.dp(10), 0, context.dp(10), 0)
                         setOnClickListener { onMonthSelected(name) }
                     },
-                    LinearLayout.LayoutParams(0, context.dp(44), if (name == "Abril") 1.5f else 1f).apply {
+                    LinearLayout.LayoutParams(0, context.dp(42), 1f).apply {
                         rightMargin = context.dp(6)
                     }
                 )
             }
-            body.put(context, months, 14)
+            monthsBar.addView(
+                context.label("📅 Escolher Mês", 11f, gold, true).apply {
+                    gravity = Gravity.CENTER
+                    background = context.bg(Color.rgb(35, 39, 35), 24, gold)
+                    minHeight = context.dp(42)
+                    setPadding(context.dp(12), 0, context.dp(12), 0)
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        ExpensesActivity.showMonthPickerDialog(context, month, onMonthSelected)
+                    }
+                },
+                LinearLayout.LayoutParams(0, context.dp(42), 1.35f)
+            )
+            body.put(context, monthsBar, 14)
 
             // Botão funcional de Adicionar Receita
             val addRevenueButton = context.label("+  Adicionar Receita", 13f, ink, true).apply {
@@ -302,32 +322,51 @@ class RevenuesActivity : AppCompatActivity() {
                 isFocusable = true
                 setOnClickListener { showAddRevenueDialog(context, month, onRefresh) }
             }
-            body.put(context, addRevenueButton, 14, 46)
+            body.put(context, addRevenueButton, 12, 46)
 
-            val baseValues = when (month) {
-                "Março" -> mutableListOf(4200.0, 890.0, 480.0, 380.0, 150.0, 250.0, 70.0)
-                "Fevereiro" -> mutableListOf(4200.0, 750.0, 440.0, 320.0, 110.0, 250.0, 80.0)
-                else -> mutableListOf(4200.0, 1150.0, 520.0, 430.0, 180.0, 250.0, 120.0)
+            val isDemo = ExpensesActivity.isDemoAccount(context)
+            val userEmail = ExpensesActivity.getCurrentUserEmail(context)
+
+            fun demoBaseForMonth(m: String): MutableList<Double> = when (m) {
+                "Novembro", "Abril" -> mutableListOf(4200.0, 1150.0, 520.0, 430.0, 180.0, 250.0, 120.0)
+                "Outubro", "Março" -> mutableListOf(4200.0, 890.0, 480.0, 380.0, 150.0, 250.0, 70.0)
+                "Setembro", "Fevereiro" -> mutableListOf(4200.0, 750.0, 440.0, 320.0, 110.0, 250.0, 80.0)
+                else -> MutableList(revenueCategories.size) { 0.0 }
             }
+
+            fun monthTotalForUser(m: String): Double {
+                val base = if (isDemo) demoBaseForMonth(m) else MutableList(revenueCategories.size) { 0.0 }
+                val custom = getCustomRevenues(context, m)
+                return base.sum() + custom.sumOf { it.amount }
+            }
+
+            val baseValues = if (isDemo) demoBaseForMonth(month) else MutableList(revenueCategories.size) { 0.0 }
             val customEntries = getCustomRevenues(context, month)
             customEntries.forEach { entry ->
                 baseValues[entry.categoryIndex] = baseValues[entry.categoryIndex] + entry.amount
             }
             val values = baseValues.toList()
             val total = values.sum()
-            val previous = when (month) {
-                "Abril" -> 6420.0
-                "Março" -> 6150.0
-                else -> 5980.0
+
+            val prevMonth = ExpensesActivity.previousMonthName(month)
+            val previous = if (isDemo && (month == "Novembro" || month == "Outubro" || month == "Setembro" || month == "Abril" || month == "Março" || month == "Fevereiro")) {
+                when (month) {
+                    "Novembro", "Abril" -> 6420.0
+                    "Outubro", "Março" -> 6150.0
+                    else -> 5980.0
+                }
+            } else {
+                monthTotalForUser(prevMonth)
             }
             val difference = total - previous
+            val diffPercent = if (previous > 0.0) abs(difference) / previous * 100.0 else 0.0
 
             val summary = context.panel()
             val consolidated = context.row()
             consolidated.addView(context.label("TOTAL CONSOLIDADO (ENTRADAS)", 10f, gold), LinearLayout.LayoutParams(0, -2, 1f))
             consolidated.addView(
                 context.label(
-                    String.format(Locale("pt", "BR"), "%s %.1f%%", if (difference >= 0) "↗" else "↘", abs(difference) / previous * 100),
+                    String.format(Locale("pt", "BR"), "%s %.1f%%", if (difference >= 0) "↗" else "↘", diffPercent),
                     11f,
                     if (difference >= 0) green else red,
                     true
@@ -355,11 +394,11 @@ class RevenuesActivity : AppCompatActivity() {
                 put(context, context.label(foot, 10f, muted), 6)
             }
             stats.addView(
-                stat("▣ Mês anterior", money.format(previous), "Referência mensal"),
+                stat("▣ Mês anterior", money.format(previous), prevMonth ?: "Início do ano"),
                 LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = context.dp(8) }
             )
             stats.addView(
-                stat("◷ Média diária", money.format(total / if (month == "Fevereiro") 28 else if (month == "Março") 31 else 30), "entrada por dia"),
+                stat("◷ Média diária", money.format(total / ExpensesActivity.daysInMonth(month)), "entrada por dia"),
                 LinearLayout.LayoutParams(0, -2, 1f)
             )
             summary.put(context, stats, 18)
@@ -384,10 +423,19 @@ class RevenuesActivity : AppCompatActivity() {
             body.put(context, context.label("◉  Receitas por Categoria", 16f, Color.WHITE, true), 24)
             val categories = context.panel()
             val bar = context.row()
-            values.forEachIndexed { i, amount ->
+            if (total > 0.0) {
+                values.forEachIndexed { i, amount ->
+                    if (amount > 0.0) {
+                        bar.addView(
+                            View(context).apply { setBackgroundColor(revenueColors[i]) },
+                            LinearLayout.LayoutParams(0, context.dp(7), amount.toFloat())
+                        )
+                    }
+                }
+            } else {
                 bar.addView(
-                    View(context).apply { setBackgroundColor(revenueColors[i]) },
-                    LinearLayout.LayoutParams(0, context.dp(7), amount.toFloat())
+                    View(context).apply { setBackgroundColor(Color.rgb(55, 59, 53)) },
+                    LinearLayout.LayoutParams(0, context.dp(7), 1f)
                 )
             }
             categories.put(context, bar)
@@ -397,23 +445,26 @@ class RevenuesActivity : AppCompatActivity() {
                 line.addView(context.label("●", 14f, revenueColors[i]), LinearLayout.LayoutParams(context.dp(22), -2))
                 line.addView(context.label(name, 12f).apply { setPadding(0, 0, context.dp(6), 0) }, LinearLayout.LayoutParams(0, -2, 1f))
                 line.addView(context.label(money.format(values[i]), 12f, Color.WHITE, true))
+                val pct = if (total > 0.0) (values[i] / total * 100).toInt() else 0
                 line.addView(
-                    context.label("${(values[i] / total * 100).toInt()}%", 10f, muted).apply { gravity = Gravity.END },
+                    context.label("$pct%", 10f, muted).apply { gravity = Gravity.END },
                     LinearLayout.LayoutParams(context.dp(34), -2)
                 )
                 line.setOnClickListener {
                     val addedInCat = customEntries.filter { it.categoryIndex == i }
                     val details = if (addedInCat.isEmpty()) {
-                        "$month: ${money.format(values[i])}\nValores consolidados de entrada na categoria."
+                        "Valores consolidados de entrada na categoria em $month."
                     } else {
                         val itemsText = addedInCat.joinToString("\n") { "• ${it.description}: ${money.format(it.amount)}" }
-                        "$month: ${money.format(values[i])}\n\nReceitas adicionadas:\n$itemsText"
+                        "Receitas adicionadas:\n$itemsText"
                     }
-                    AlertDialog.Builder(context)
-                        .setTitle(name)
-                        .setMessage(details)
-                        .setPositiveButton("Fechar", null)
-                        .show()
+                    ExpensesActivity.showStyledDetailsDialog(
+                        context = context,
+                        title = name,
+                        subtitle = "$month: ${money.format(values[i])}",
+                        details = details,
+                        accentColor = revenueColors[i]
+                    )
                 }
                 categories.put(context, line, if (i == 0) 14 else 0)
             }
@@ -434,10 +485,14 @@ class RevenuesActivity : AppCompatActivity() {
                     itemRow.addView(infoCol, LinearLayout.LayoutParams(0, -2, 1f))
                     itemRow.addView(context.label("+ ${money.format(entry.amount)}", 12f, green, true))
                     itemRow.setOnClickListener {
-                        AlertDialog.Builder(context)
-                            .setTitle(entry.description)
-                            .setMessage("Categoria: ${revenueCategories[entry.categoryIndex]}\nValor: ${money.format(entry.amount)}\n\nDeseja remover este lançamento?")
-                            .setPositiveButton("Remover") { _, _ ->
+                        ExpensesActivity.showStyledDetailsDialog(
+                            context = context,
+                            title = entry.description,
+                            subtitle = "$month • + ${money.format(entry.amount)}",
+                            details = "Categoria: ${revenueCategories[entry.categoryIndex]}\n\nDeseja remover este lançamento?",
+                            accentColor = revenueColors[entry.categoryIndex],
+                            removeLabel = "Remover",
+                            onRemove = {
                                 val updated = getCustomRevenues(context, month)
                                 if (index in updated.indices) {
                                     updated.removeAt(index)
@@ -445,17 +500,21 @@ class RevenuesActivity : AppCompatActivity() {
                                     onRefresh()
                                 }
                             }
-                            .setNegativeButton("Fechar", null)
-                            .show()
+                        )
                     }
                     customPanel.put(context, itemRow, if (index == 0) 0 else 6)
                 }
                 body.put(context, customPanel, 12)
             }
 
+            val footerText = if (isDemo) {
+                "Conta de demonstração • Arraste para o lado ↔"
+            } else {
+                "Conta: $userEmail • Arraste para o lado ↔"
+            }
             body.put(
                 context,
-                context.label("Conta de demonstração • Arraste para o lado ↔", 11f, muted).apply { gravity = Gravity.CENTER },
+                context.label(footerText, 11f, muted).apply { gravity = Gravity.CENTER },
                 20
             )
             return scroll

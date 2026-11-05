@@ -2,9 +2,11 @@
 
 Abra AuraByV2 no Android Studio, sincronize o Gradle e execute app.
 
-Conta de demonstração local:
+Conta de demonstração local (ou crie sua própria conta na aba **Cadastrar**):
 - E-mail: teste@aura.com
 - Senha: Aura1234
+
+Na tela inicial (`MainActivity.kt`), é possível alternar entre **Entrar** e **Cadastrar** (ou tocar em **Cadastre-se** no rodapé) para criar novas contas com e-mail, senha e confirmação de senha, que ficam salvas localmente no dispositivo. Também é possível redefinir a senha em **Esqueci minha senha**.
 
 O login abre a tela de despesas, com abas superiores para alternar entre **Despesas** e **Receitas**.
 Os meses Abril, Março e Fevereiro alteram resumo e categorias em ambas as telas.
